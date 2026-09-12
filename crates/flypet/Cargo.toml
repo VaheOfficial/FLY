@@ -6,4 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = "1"
 flybrain.workspace = true
+pollster = "1"
+wgpu = "30"
+winit = "0.30"
