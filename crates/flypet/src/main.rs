@@ -1,13 +1,15 @@
 //! `flypet`: the desktop shell. Translates desktop state into sensory input for
 //! `flybrain` and renders the fly.
 //!
-//! Current state: a small transparent, click-through, always-on-top window
-//! whose opacity follows the proboscis motor neuron rate while the sugar
-//! GRNs are stimulated. It proves the brain ticks in real time inside a
-//! desktop window on a GPU shared with the renderer.
+//! Current state: a small transparent, click-through, always-on-top window.
+//! Keystrokes anywhere on the desktop shake the surface under the fly (leg
+//! chordotonal organs) and, when sustained, reach its ear (Johnston's
+//! organ). The window's opacity follows courtship arousal (pC1), so typing
+//! should make it light up.
 
 mod brain;
 mod render;
+mod senses;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -24,19 +26,19 @@ use winit::window::{Window, WindowId, WindowLevel};
 
 use brain::Brain;
 use render::Renderer;
+use senses::Senses;
 
 const FRAME: Duration = Duration::from_micros(16_667);
 const WINDOW_SIZE: u32 = 160;
-/// Sugar on the labellum, for now always present so there is something to see.
-const SUGAR_HZ: f32 = 100.0;
-/// Opacity reaches full at this MN9 rate.
-const FULL_OPACITY_HZ: f32 = 200.0;
+/// Opacity reaches full at this pC1 rate.
+const FULL_OPACITY_HZ: f32 = 50.0;
 
 struct App<'a> {
     net: &'a Connectome,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     brain: Option<Brain<'a>>,
+    senses: Option<Senses>,
     last_tick: Instant,
     next_frame: Instant,
     last_report: Instant,
@@ -50,6 +52,7 @@ impl<'a> App<'a> {
             window: None,
             renderer: None,
             brain: None,
+            senses: None,
             last_tick: now,
             next_frame: now,
             last_report: now,
@@ -57,15 +60,23 @@ impl<'a> App<'a> {
     }
 
     fn frame(&mut self) -> Result<()> {
-        let (Some(brain), Some(renderer)) = (self.brain.as_mut(), self.renderer.as_mut()) else {
+        let (Some(brain), Some(renderer), Some(senses)) = (
+            self.brain.as_mut(),
+            self.renderer.as_mut(),
+            self.senses.as_mut(),
+        ) else {
             return Ok(());
         };
         let now = Instant::now();
-        brain.tick(now - self.last_tick);
+        let elapsed = now - self.last_tick;
         self.last_tick = now;
 
-        let mn9_hz = brain.rate_hz(brain.proboscis_motor);
-        let opacity = f64::from((mn9_hz / FULL_OPACITY_HZ).clamp(0.15, 1.0));
+        let vibration = senses.update(elapsed);
+        brain.feel(vibration);
+        brain.tick(elapsed);
+
+        let arousal_hz = brain.rate_hz(brain.courtship_arousal);
+        let opacity = f64::from((arousal_hz / FULL_OPACITY_HZ).clamp(0.15, 1.0));
         renderer.present([0.95, 0.55, 0.1], opacity)?;
 
         if now.duration_since(self.last_report) >= Duration::from_secs(1) {
@@ -73,9 +84,12 @@ impl<'a> App<'a> {
             // A closed console must not take the pet down with it.
             let _ = writeln!(
                 std::io::stdout(),
-                "sugar GRNs {:6.1} Hz   MN9 {:6.1} Hz",
-                brain.rate_hz(brain.sugar_grns),
-                mn9_hz
+                "substrate {:5.0} Hz  song {:5.0} Hz | leg CO {:6.1} Hz  JO {:6.1} Hz  pC1 {:6.1} Hz",
+                vibration.substrate_hz,
+                vibration.song_hz,
+                brain.rate_hz(brain.leg_chordotonal),
+                brain.rate_hz(brain.johnstons_organ),
+                arousal_hz
             );
         }
         Ok(())
@@ -100,12 +114,19 @@ impl ApplicationHandler for App<'_> {
         }
 
         let (renderer, gpu) = Renderer::new(window.clone(), self.net).expect("GPU for window");
-        let mut brain = Brain::new(self.net, Some(gpu));
-        brain.set_sugar_hz(SUGAR_HZ);
+        let brain = Brain::new(self.net, Some(gpu));
         println!("backend: {}", brain.backend_name());
+        println!(
+            "populations: leg CO {}, JO sound {}, pC1 {}",
+            brain.population_size(brain.leg_chordotonal),
+            brain.population_size(brain.johnstons_organ),
+            brain.population_size(brain.courtship_arousal)
+        );
+        let senses = Senses::install().expect("desktop senses");
 
         self.renderer = Some(renderer);
         self.brain = Some(brain);
+        self.senses = Some(senses);
         self.window = Some(window);
         self.last_tick = Instant::now();
     }
