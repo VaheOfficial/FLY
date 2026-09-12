@@ -1,4 +1,4 @@
 # docs
 
-Design notes and decision records for FLY. The product spec lives outside the
-repo; this folder holds engineering documentation that belongs with the code.
+Engineering documentation for FLY: how things work, how to build and run,
+data formats, and setup guides. The product spec lives outside the repo.
