@@ -1,6 +1,6 @@
 //! External input: Poisson spike trains onto chosen neurons.
 
-use super::cpu::CpuSim;
+use crate::backend::Simulator;
 
 /// Independent Poisson spike trains onto a set of neurons, the stimulation
 /// protocol of Shiu et al. Each Poisson event adds `weight` mV of drive.
@@ -44,7 +44,7 @@ impl PoissonDrive {
     }
 
     /// Apply one step of drive.
-    pub fn apply(&mut self, sim: &mut CpuSim<'_>) {
+    pub fn apply<S: Simulator + ?Sized>(&mut self, sim: &mut S) {
         let weight = self.weight;
         for n in self.sample(sim.params().dt) {
             sim.inject(n, weight);
@@ -79,7 +79,7 @@ impl SplitMix64 {
 mod tests {
     use super::*;
     use crate::sim::test_net::{ACH, net};
-    use crate::sim::{LifParams, SignPolicy};
+    use crate::sim::{CpuSim, LifParams, SignPolicy};
 
     #[test]
     fn poisson_drive_events_arrive_at_the_requested_rate() {

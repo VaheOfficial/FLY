@@ -9,6 +9,7 @@ use wgpu::{BindGroup, Buffer, BufferUsages, ComputePipeline};
 
 use super::GpuContext;
 use super::buffers::{ConnectomeBuffers, download, init_buffer, zeroed_buffer};
+use crate::backend::Simulator;
 use crate::connectome::Connectome;
 use crate::sim::{LifParams, SignPolicy, StepCoefficients};
 
@@ -357,6 +358,37 @@ impl GpuSim {
                 mapped_at_creation: false,
             });
         }
+    }
+}
+
+impl Simulator for GpuSim {
+    fn params(&self) -> &LifParams {
+        &self.params
+    }
+
+    fn neuron_count(&self) -> usize {
+        self.neuron_count as usize
+    }
+
+    fn backend_name(&self) -> String {
+        format!("gpu: {}", self.ctx.adapter_info.name)
+    }
+
+    fn inject(&mut self, neuron: u32, delta_g: f32) {
+        GpuSim::inject(self, neuron, delta_g);
+    }
+
+    fn advance(&mut self) {
+        self.queue_step();
+    }
+
+    fn flush(&mut self) {
+        self.submit();
+    }
+
+    fn take_spike_counts(&mut self) -> Vec<u32> {
+        self.submit();
+        GpuSim::take_spike_counts(self)
     }
 }
 

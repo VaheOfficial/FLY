@@ -1,6 +1,7 @@
 //! The CPU reference implementation of the integrate-and-fire step.
 
 use super::{LifParams, SignPolicy, StepCoefficients};
+use crate::backend::Simulator;
 use crate::connectome::Connectome;
 
 /// CPU simulation state over a borrowed connectome.
@@ -24,6 +25,8 @@ pub struct CpuSim<'a> {
     coupling: f32,
     spiked: Vec<u32>,
     total_spikes: u64,
+    /// Per-neuron spikes since the last `take_spike_counts`.
+    spike_counts: Vec<u32>,
 }
 
 impl<'a> CpuSim<'a> {
@@ -45,6 +48,7 @@ impl<'a> CpuSim<'a> {
             coupling: coefficients.coupling,
             spiked: Vec::new(),
             total_spikes: 0,
+            spike_counts: vec![0; n],
             net,
             params,
         }
@@ -121,6 +125,9 @@ impl<'a> CpuSim<'a> {
             }
         }
         self.total_spikes += self.spiked.len() as u64;
+        for &i in &self.spiked {
+            self.spike_counts[i as usize] += 1;
+        }
 
         // 3. Queue this step's spikes for delivery after the delay.
         let target = ((self.step + self.delay_steps as u64) % self.delay_steps as u64) as usize;
@@ -138,6 +145,34 @@ impl<'a> CpuSim<'a> {
             self.step();
             on_step(self);
         }
+    }
+}
+
+impl Simulator for CpuSim<'_> {
+    fn params(&self) -> &LifParams {
+        &self.params
+    }
+
+    fn neuron_count(&self) -> usize {
+        self.v.len()
+    }
+
+    fn backend_name(&self) -> String {
+        "cpu".to_owned()
+    }
+
+    fn inject(&mut self, neuron: u32, delta_g: f32) {
+        CpuSim::inject(self, neuron, delta_g);
+    }
+
+    fn advance(&mut self) {
+        self.step();
+    }
+
+    fn flush(&mut self) {}
+
+    fn take_spike_counts(&mut self) -> Vec<u32> {
+        std::mem::replace(&mut self.spike_counts, vec![0; self.v.len()])
     }
 }
 
