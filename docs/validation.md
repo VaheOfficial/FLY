@@ -79,3 +79,28 @@ Limitation: the Giant Fiber's outputs to `TTMn` and to the peripherally
 synapsing interneuron `PSI` are largely electrical in the real fly. Gap
 junctions are not in the connectome, so `PSI` stays silent and `TTMn` is
 driven only by the chemical component.
+
+## Hearing: Johnston's organ reaches the auditory centres, not yet P1
+
+Sound-sensitive Johnston's organ neurons are groups A and B (`JO-A1`,
+`JO-A2`, `JO-A3`, `JO-A4`, `JO-A-unclear`, `JO-B1_a`, `JO-B1_b`, `JO-B1_c`,
+`JO-B2`, `JO-B3`, `JO-B4_a`, `JO-B4_b`, `JO-B-unclear`; 138 neurons). The
+courtship command population P1 is the `pC1_*` types (148 neurons).
+
+```
+--stim JO-A1,...,JO-B-unclear --report pC1_1a,pC1_16b,pC1_4a --rate 200 --dt 1.0
+```
+
+Driving JO-A/B fires the antennal mechanosensory and motor centre, saddle,
+and wedge neurons (`AMMC*`, `SAD*`, `WED*`), the known first stages of the
+auditory pathway, and the Giant Fiber, which does receive antennal
+mechanosensory input. Every `pC1` neuron stays silent at unitary weights of
+0.1 and 0.15, even when 10% of the brain is active. Song reaching P1 in the
+real male is state dependent and involves modulation the wiring alone does
+not carry, so the pet's arousal loop will need a modelled drive here rather
+than pure feedforward input. Open.
+
+The same result holds end to end on the desktop: keystrokes in another
+window drive the leg chordotonal organs and Johnston's organ to about 340 Hz
+under sustained typing and decay back to silence within seconds after it
+stops, with `pC1` at zero throughout.
