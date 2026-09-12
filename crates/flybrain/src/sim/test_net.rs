@@ -4,7 +4,7 @@ use crate::connectome::{Connectome, NO_STRING, Neuron, Side, Transmitter};
 
 /// A tiny network: neuron `i` with transmitter `nts[i]`, edges as
 /// `(pre, post, synapse_count)`.
-pub(super) fn net(nts: &[Transmitter], edges: &[(u32, u32, u16)]) -> Connectome {
+pub(crate) fn net(nts: &[Transmitter], edges: &[(u32, u32, u16)]) -> Connectome {
     let n = nts.len();
     let neurons = nts
         .iter()
@@ -42,5 +42,5 @@ pub(super) fn net(nts: &[Transmitter], edges: &[(u32, u32, u16)]) -> Connectome 
     c
 }
 
-pub(super) const ACH: Transmitter = Transmitter::Acetylcholine;
-pub(super) const GABA: Transmitter = Transmitter::Gaba;
+pub(crate) const ACH: Transmitter = Transmitter::Acetylcholine;
+pub(crate) const GABA: Transmitter = Transmitter::Gaba;

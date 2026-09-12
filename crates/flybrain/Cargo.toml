@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "1"
+wgpu = "30"
 
 [dev-dependencies]
 clap = { version = "4", features = ["derive"] }
