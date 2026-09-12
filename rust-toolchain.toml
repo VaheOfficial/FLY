@@ -1,2 +1,5 @@
+# Pinned to the MSVC host triple: the GNU toolchain needs a MinGW dlltool that
+# is not part of a plain rustup install, and MSVC is the standard target for
+# wgpu and the windows crate. Revisit when macOS/Linux builds are added.
 [toolchain]
-channel = "stable"
+channel = "stable-x86_64-pc-windows-msvc"
