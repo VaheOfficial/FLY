@@ -75,6 +75,18 @@ impl GpuContext {
         })
     }
 
+    /// Wrap a device the host already opened, e.g. one that also presents to
+    /// a window, so the simulation and the renderer share one GPU queue.
+    /// The device must have been requested with at least [`required_limits`].
+    pub fn from_parts(adapter: &Adapter, device: Device, queue: Queue) -> Self {
+        Self {
+            device,
+            queue,
+            adapter_info: adapter.get_info(),
+            limits: adapter.limits(),
+        }
+    }
+
     /// Submit and block until the GPU has finished everything queued so far.
     pub fn wait_idle(&self) {
         self.device
@@ -85,7 +97,7 @@ impl GpuContext {
 
 /// The limits we ask the device for: WebGPU defaults, raised where the
 /// simulation needs more, and checked against what the adapter offers.
-fn required_limits(
+pub fn required_limits(
     adapter: &Adapter,
     min_buffer_bytes: u64,
 ) -> Result<wgpu::Limits, GpuUnavailable> {

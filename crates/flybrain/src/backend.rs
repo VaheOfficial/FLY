@@ -36,6 +36,17 @@ pub enum Preference {
     CpuOnly,
 }
 
+/// Open a GPU simulator on a context the host already created, e.g. one
+/// shared with a window's renderer.
+pub fn open_on<'a>(
+    ctx: GpuContext,
+    net: &'a Connectome,
+    params: LifParams,
+    signs: SignPolicy,
+) -> Box<dyn Simulator + 'a> {
+    Box::new(GpuSim::new(ctx, net, params, signs))
+}
+
 /// Open a simulator over `net`, honouring `preference`. Returns the
 /// simulator and, if the GPU was tried and rejected, why.
 pub fn open<'a>(
