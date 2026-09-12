@@ -8,15 +8,23 @@ Rust, single binary, GPU compute and rendering through `wgpu`.
 
 | Path | What |
 |---|---|
-| `crates/flybrain` | The nervous-system simulation. Portable; no windowing. |
-| `crates/flypet` | The desktop shell: transparent window, input capture, sprite rendering. |
+| `crates/flybrain` | The nervous-system simulation. Portable; no windowing. GPU backend with CPU fallback. |
+| `crates/flypet` | The desktop shell: transparent window, input capture, rendering. |
 | `tools/connectome-convert` | Build-time converter from published connectome tables to the packed binary the sim loads. |
+| `tools/fetch-malecns.ps1` | Downloads and verifies the MaleCNS tables the converter reads. |
 | `experiments/` | Throwaway explorations, excluded from the workspace. |
 | `data/` | Fetched datasets and generated binaries. Git-ignored. |
-| `docs/` | Engineering notes and decision records. |
+| `docs/` | Engineering documentation. |
 
-## Build
+## Build and run
 
 ```
 cargo build
+.\tools\fetch-malecns.ps1
+cargo run --release -p connectome-convert -- build
+cargo run --release -p flybrain --example stimulate -- --stim LB3b,LB3c --report MN9 --w-syn 0.1
 ```
+
+The last command drives the labellar sugar-sensing neurons and reports the
+proboscis motor neuron firing. See `docs/validation.md` for the circuits the
+model is checked against and how fast it runs.
