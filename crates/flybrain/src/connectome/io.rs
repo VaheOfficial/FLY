@@ -326,6 +326,19 @@ mod tests {
     }
 
     #[test]
+    fn neurons_of_types_matches_by_published_name() {
+        let c = sample();
+        assert_eq!(c.neurons_of_types(&["DNp01"]), vec![0, 1]);
+        assert_eq!(c.neurons_of_types(&["TTMn", "no such type"]), vec![2]);
+        assert_eq!(c.neurons_of_types::<&str>(&[]), Vec::<u32>::new());
+        // The superclass string must not be mistaken for a type name.
+        assert_eq!(
+            c.neurons_of_types(&["descending_neuron"]),
+            Vec::<u32>::new()
+        );
+    }
+
+    #[test]
     fn validate_catches_unsorted_targets() {
         let mut c = sample();
         c.post = vec![2, 2, 0];

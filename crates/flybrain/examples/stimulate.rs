@@ -69,7 +69,7 @@ fn main() {
         t0.elapsed()
     );
 
-    let stim = neurons_of_types(&net, &args.stim);
+    let stim = net.neurons_of_types(&args.stim);
     if stim.is_empty() {
         eprintln!("no neurons match --stim {:?}", args.stim);
         std::process::exit(1);
@@ -140,7 +140,7 @@ fn report(net: &Connectome, counts: &[u32], stim: &[u32], args: &Args) {
     println!("stimulated neurons fired at {mean_stim_hz:.1} Hz on average");
 
     for ty in &args.report {
-        let members = neurons_of_types(net, std::slice::from_ref(ty));
+        let members = net.neurons_of_types(std::slice::from_ref(ty));
         println!("{ty}: {} neuron(s)", members.len());
         for &n in &members {
             let nr = &net.neurons[n as usize];
@@ -185,13 +185,4 @@ fn report(net: &Connectome, counts: &[u32], stim: &[u32], args: &Args) {
     for (sc, (n, spikes)) in by_superclass {
         println!("  {n:>7} neurons  {spikes:>9} spikes  {sc}");
     }
-}
-
-fn neurons_of_types(net: &Connectome, types: &[String]) -> Vec<u32> {
-    (0..net.neuron_count() as u32)
-        .filter(|&i| {
-            net.string(net.neurons[i as usize].type_name)
-                .is_some_and(|t| types.iter().any(|want| want == t))
-        })
-        .collect()
 }

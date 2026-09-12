@@ -175,6 +175,26 @@ impl Connectome {
         (idx != NO_STRING).then(|| self.strings[idx as usize].as_str())
     }
 
+    /// Indices of every neuron whose published cell type is one of `types`,
+    /// in index order. Unknown type names simply match nothing.
+    pub fn neurons_of_types<S: AsRef<str>>(&self, types: &[S]) -> Vec<u32> {
+        let wanted: Vec<u32> = types
+            .iter()
+            .filter_map(|t| {
+                self.strings
+                    .iter()
+                    .position(|s| s == t.as_ref())
+                    .map(|i| i as u32)
+            })
+            .collect();
+        if wanted.is_empty() {
+            return Vec::new();
+        }
+        (0..self.neurons.len() as u32)
+            .filter(|&i| wanted.contains(&self.neurons[i as usize].type_name))
+            .collect()
+    }
+
     /// Check the structural invariants a well-formed connectome must satisfy.
     pub fn validate(&self) -> Result<(), String> {
         let n = self.neurons.len();
