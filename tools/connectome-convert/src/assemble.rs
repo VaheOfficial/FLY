@@ -34,7 +34,7 @@ impl Interner {
 
 /// Build the connectome. `edges` may be in any order; they are sorted here.
 /// Fails on duplicate (pre, post) pairs or weights that do not fit in `u16`.
-pub fn assemble(
+pub fn connectome(
     neurons: &NeuronTable,
     nt: &[NtRecord],
     mut edges: Vec<Edge>,
