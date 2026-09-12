@@ -3,3 +3,5 @@
 //!
 //! This crate is deliberately free of windowing and desktop concerns so it can
 //! be reused by the desktop pet (`flypet`), a firewall daemon, or a robot.
+
+pub mod connectome;
