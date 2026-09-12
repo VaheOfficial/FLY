@@ -398,6 +398,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "clap",
+ "flybrain",
 ]
 
 [[package]]

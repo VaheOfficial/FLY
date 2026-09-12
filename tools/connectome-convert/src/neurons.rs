@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use arrow::array::Array;
+use arrow::array::{Array, AsArray, ListArray};
+use arrow::datatypes::Int64Type;
 
 use crate::feather;
 
@@ -22,6 +23,8 @@ pub struct Neuron {
     pub class: Option<String>,
     pub soma_side: Option<String>,
     pub status: Option<String>,
+    /// Soma position in the EM voxel grid (8 nm isotropic), if known.
+    pub soma: Option<[i32; 3]>,
 }
 
 /// All neurons, sorted by body id, plus a body id to dense index map.
@@ -46,6 +49,7 @@ impl NeuronTable {
         let c_class = feather::column_index(&schema, "class")?;
         let c_side = feather::column_index(&schema, "somaSide")?;
         let c_status = feather::column_index(&schema, "status")?;
+        let c_soma = feather::column_index(&schema, "somaLocation")?;
 
         let mut neurons = Vec::new();
         for batch in reader {
@@ -57,6 +61,13 @@ impl NeuronTable {
             let class = feather::str_column(&batch, c_class)?;
             let side = feather::str_column(&batch, c_side)?;
             let status = feather::str_column(&batch, c_status)?;
+            let soma = batch.column(c_soma);
+            let soma = soma.as_list_opt::<i32>().with_context(|| {
+                format!(
+                    "somaLocation has type {:?}, expected List",
+                    soma.data_type()
+                )
+            })?;
             for i in 0..batch.num_rows() {
                 let Some(superclass) = superclass.get(i) else {
                     continue;
@@ -72,6 +83,7 @@ impl NeuronTable {
                     class: class.get(i).map(str::to_owned),
                     soma_side: side.get(i).map(str::to_owned),
                     status: status.get(i).map(str::to_owned),
+                    soma: soma_at(soma, i, body.value(i))?,
                 });
             }
         }
@@ -94,4 +106,30 @@ impl NeuronTable {
     pub fn index_of(&self, body_id: i64) -> Option<u32> {
         self.index.get(&body_id).copied()
     }
+}
+
+/// Decode one `somaLocation` entry: a null, or a list of exactly three i64s.
+fn soma_at(col: &ListArray, i: usize, body_id: i64) -> Result<Option<[i32; 3]>> {
+    if col.is_null(i) {
+        return Ok(None);
+    }
+    let xyz = col.value(i);
+    let xyz = xyz
+        .as_primitive_opt::<Int64Type>()
+        .with_context(|| format!("somaLocation of body {body_id} is not a list of Int64"))?;
+    if xyz.len() != 3 {
+        bail!(
+            "somaLocation of body {body_id} has {} coordinates, expected 3",
+            xyz.len()
+        );
+    }
+    let coord = |k: usize| {
+        i32::try_from(xyz.value(k)).with_context(|| {
+            format!(
+                "somaLocation coordinate {} of body {body_id} does not fit i32",
+                xyz.value(k)
+            )
+        })
+    };
+    Ok(Some([coord(0)?, coord(1)?, coord(2)?]))
 }

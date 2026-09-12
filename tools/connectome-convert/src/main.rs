@@ -1,11 +1,15 @@
 //! Converts raw connectome exports (neurons, synapses, cell types, transmitter
 //! predictions) into the packed CSR binary that `flybrain` loads at startup.
 
+mod build;
 mod edges;
 mod feather;
 mod neurons;
+mod transmitters;
 
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -13,8 +17,13 @@ use anyhow::{Context, Result};
 use arrow::array::Array;
 use arrow::util::pretty::print_batches;
 use clap::{Parser, Subcommand};
+use flybrain::connectome::{self, Transmitter};
 
 use crate::neurons::NeuronTable;
+
+const ANNOTATIONS: &str = "body-annotations-male-cns-v1.0-minconf-0.5.feather";
+const TRANSMITTERS: &str = "body-neurotransmitters-male-cns-v1.0.feather";
+const WEIGHTS: &str = "connectome-weights-male-cns-v1.0-minconf-0.5.feather";
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -53,6 +62,28 @@ enum Command {
         #[arg(long, default_value = "data/malecns-v1.0")]
         data: PathBuf,
     },
+    /// Build the packed connectome file that flybrain loads.
+    Build {
+        /// Directory holding the downloaded MaleCNS flat-connectome tables.
+        #[arg(long, default_value = "data/malecns-v1.0")]
+        data: PathBuf,
+        /// Where to write the packed file.
+        #[arg(long, default_value = "data/malecns-v1.0.flycnx")]
+        out: PathBuf,
+    },
+    /// Load a packed connectome file, verify it, and print a summary plus the
+    /// strongest outputs of a named cell type as a sanity check.
+    Check {
+        /// Packed connectome file.
+        #[arg(default_value = "data/malecns-v1.0.flycnx")]
+        path: PathBuf,
+        /// Cell type whose outputs to list.
+        #[arg(long, default_value = "DNp01")]
+        cell_type: String,
+        /// How many outputs to list per neuron.
+        #[arg(long, default_value_t = 8)]
+        top: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -66,6 +97,12 @@ fn main() -> Result<()> {
             nonnull,
         } => counts(&path, &column, top, nonnull.as_deref()),
         Command::Summarize { data } => summarize(&data),
+        Command::Build { data, out } => build(&data, &out),
+        Command::Check {
+            path,
+            cell_type,
+            top,
+        } => check(&path, &cell_type, top),
     }
 }
 
@@ -155,8 +192,7 @@ fn counts(path: &Path, column: &str, top: usize, nonnull: Option<&str>) -> Resul
 
 fn summarize(data: &Path) -> Result<()> {
     let t0 = Instant::now();
-    let neurons =
-        NeuronTable::load(&data.join("body-annotations-male-cns-v1.0-minconf-0.5.feather"))?;
+    let neurons = NeuronTable::load(&data.join(ANNOTATIONS))?;
     println!("neurons: {}  ({:.1?})", neurons.len(), t0.elapsed());
     let count =
         |pred: fn(&neurons::Neuron) -> bool| neurons.neurons.iter().filter(|n| pred(n)).count();
@@ -164,6 +200,7 @@ fn summarize(data: &Path) -> Result<()> {
     println!("  with instance: {}", count(|n| n.instance.is_some()));
     println!("  with class: {}", count(|n| n.class.is_some()));
     println!("  with soma side: {}", count(|n| n.soma_side.is_some()));
+    println!("  with soma position: {}", count(|n| n.soma.is_some()));
     println!(
         "  status Traced: {}",
         count(|n| n.status.as_deref() == Some("Traced"))
@@ -180,10 +217,7 @@ fn summarize(data: &Path) -> Result<()> {
     }
 
     let t1 = Instant::now();
-    let (edges, stats) = edges::load(
-        &data.join("connectome-weights-male-cns-v1.0-minconf-0.5.feather"),
-        &neurons,
-    )?;
+    let (edges, stats) = edges::load(&data.join(WEIGHTS), &neurons)?;
     println!(
         "weights table: {} rows  ({:.1?})",
         stats.rows_seen,
@@ -222,5 +256,124 @@ fn summarize(data: &Path) -> Result<()> {
         neurons.len() - connected
     );
     println!("max edge weight: {max_w}");
+    Ok(())
+}
+
+fn build(data: &Path, out: &Path) -> Result<()> {
+    let t0 = Instant::now();
+    let neurons = NeuronTable::load(&data.join(ANNOTATIONS))?;
+    println!("neurons: {}", neurons.len());
+    println!(
+        "  with soma position: {}",
+        neurons.neurons.iter().filter(|n| n.soma.is_some()).count()
+    );
+
+    let (nt, nt_stats) = transmitters::load(&data.join(TRANSMITTERS), &neurons)?;
+    println!(
+        "transmitters: {} rows, {} matched neurons, {} neurons without a row",
+        nt_stats.rows_seen, nt_stats.matched, nt_stats.neurons_without_row
+    );
+    println!(
+        "  consensus unclear: {}   ground truth known: {}",
+        nt_stats.consensus_unclear, nt_stats.with_ground_truth
+    );
+
+    let (edges, edge_stats) = edges::load(&data.join(WEIGHTS), &neurons)?;
+    println!(
+        "edges: {} kept of {} rows, {} synapses",
+        edge_stats.kept, edge_stats.rows_seen, edge_stats.kept_weight
+    );
+
+    let connectome = build::assemble(&neurons, &nt, edges)?;
+    println!(
+        "assembled: {} neurons, {} edges, {} strings  ({:.1?})",
+        connectome.neuron_count(),
+        connectome.edge_count(),
+        connectome.strings.len(),
+        t0.elapsed()
+    );
+
+    let file = File::create(out).with_context(|| format!("creating {}", out.display()))?;
+    connectome::io::write(&connectome, BufWriter::new(file))
+        .with_context(|| format!("writing {}", out.display()))?;
+    let bytes = std::fs::metadata(out)?.len();
+    println!(
+        "wrote {} ({:.1} MB, {:.1?} total)",
+        out.display(),
+        bytes as f64 / 1e6,
+        t0.elapsed()
+    );
+    Ok(())
+}
+
+fn check(path: &Path, cell_type: &str, top: usize) -> Result<()> {
+    let t0 = Instant::now();
+    let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let c = connectome::io::read(BufReader::new(file))
+        .with_context(|| format!("reading {}", path.display()))?;
+    println!(
+        "{}: {} neurons, {} edges, {} strings, loaded and validated in {:.1?}",
+        path.display(),
+        c.neuron_count(),
+        c.edge_count(),
+        c.strings.len(),
+        t0.elapsed()
+    );
+
+    let synapses: u64 = c.weight.iter().map(|&w| u64::from(w)).sum();
+    let with_outputs = (0..c.neuron_count() as u32)
+        .filter(|&i| c.targets(i).next().is_some())
+        .count();
+    let mut has_input = vec![false; c.neuron_count()];
+    for &p in &c.post {
+        has_input[p as usize] = true;
+    }
+    let connected = (0..c.neuron_count())
+        .filter(|&i| has_input[i] || c.targets(i as u32).next().is_some())
+        .count();
+    println!("  synapses: {synapses}");
+    println!(
+        "  neurons with outputs: {with_outputs}   with any connection: {connected}   isolated: {}",
+        c.neuron_count() - connected
+    );
+    println!(
+        "  with soma position: {}",
+        c.neurons.iter().filter(|n| n.soma.is_some()).count()
+    );
+
+    println!("  consensus transmitter:");
+    for t in Transmitter::ALL {
+        let n = c.neurons.iter().filter(|nr| nr.nt_consensus == t).count();
+        println!("    {n:>8}  {}", t.name());
+    }
+
+    let members: Vec<u32> = (0..c.neuron_count() as u32)
+        .filter(|&i| c.string(c.neurons[i as usize].type_name) == Some(cell_type))
+        .collect();
+    println!("{cell_type}: {} neuron(s)", members.len());
+    for &i in &members {
+        let nr = &c.neurons[i as usize];
+        let mut outs: Vec<(u32, u16)> = c.targets(i).collect();
+        outs.sort_by_key(|&(_, w)| std::cmp::Reverse(w));
+        println!(
+            "  body {} {:?} {} soma {:?}: {} outputs, {} synapses",
+            nr.body_id,
+            nr.side,
+            nr.nt_consensus.name(),
+            nr.soma,
+            outs.len(),
+            outs.iter().map(|&(_, w)| u64::from(w)).sum::<u64>()
+        );
+        for (post, w) in outs.iter().take(top) {
+            let p = &c.neurons[*post as usize];
+            println!(
+                "    {w:>5}  -> {:<20} body {} {:?} {}",
+                c.string(p.type_name).unwrap_or("?"),
+                p.body_id,
+                p.side,
+                c.string(p.superclass).unwrap_or("?")
+            );
+        }
+    }
     Ok(())
 }

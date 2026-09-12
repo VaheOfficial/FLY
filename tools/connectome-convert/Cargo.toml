@@ -8,5 +8,6 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+flybrain.workspace = true
 arrow = { version = "59", default-features = false, features = ["ipc", "ipc_compression", "prettyprint"] }
 clap = { version = "4", features = ["derive"] }
