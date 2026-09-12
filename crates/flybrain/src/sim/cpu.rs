@@ -1,6 +1,6 @@
 //! The CPU reference implementation of the integrate-and-fire step.
 
-use super::{LifParams, SignPolicy};
+use super::{LifParams, SignPolicy, StepCoefficients};
 use crate::connectome::Connectome;
 
 /// CPU simulation state over a borrowed connectome.
@@ -28,17 +28,9 @@ pub struct CpuSim<'a> {
 
 impl<'a> CpuSim<'a> {
     pub fn new(net: &'a Connectome, params: LifParams, signs: SignPolicy) -> Self {
-        assert!(params.dt > 0.0, "dt must be positive");
-        assert!(
-            (params.tau_m - params.tau_syn).abs() > 1e-6,
-            "tau_m and tau_syn must differ for the exact integrator"
-        );
+        let coefficients = StepCoefficients::new(&params);
         let n = net.neuron_count();
-        let delay_steps = (params.delay / params.dt).round().max(1.0) as usize;
-        let refractory_steps = (params.refractory / params.dt).round() as u64;
-        let decay_m = (-params.dt / params.tau_m).exp();
-        let decay_syn = (-params.dt / params.tau_syn).exp();
-        let coupling = params.tau_syn / (params.tau_syn - params.tau_m) * (decay_syn - decay_m);
+        let delay_steps = coefficients.delay_steps;
         Self {
             sign: signs.per_neuron(net),
             v: vec![params.v_rest; n],
@@ -47,10 +39,10 @@ impl<'a> CpuSim<'a> {
             pending: vec![Vec::new(); delay_steps],
             step: 0,
             delay_steps,
-            refractory_steps,
-            decay_m,
-            decay_syn,
-            coupling,
+            refractory_steps: u64::from(coefficients.refractory_steps),
+            decay_m: coefficients.decay_m,
+            decay_syn: coefficients.decay_syn,
+            coupling: coefficients.coupling,
             spiked: Vec::new(),
             total_spikes: 0,
             net,

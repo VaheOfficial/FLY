@@ -24,7 +24,7 @@
 mod cpu;
 mod drive;
 #[cfg(test)]
-mod test_net;
+pub(crate) mod test_net;
 
 pub use cpu::CpuSim;
 pub use drive::{PoissonDrive, SplitMix64};
@@ -61,6 +61,40 @@ impl Default for LifParams {
             w_syn: 0.275,
             delay: 1.8,
             dt: 0.1,
+        }
+    }
+}
+
+/// Per-step constants derived from [`LifParams`], shared by the CPU and GPU
+/// backends so both integrate identically.
+///
+/// The membrane and drive form a linear system whose one-step solution is
+/// `v' = v_rest + (v - v_rest) * decay_m + g * coupling` and
+/// `g' = g * decay_syn`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StepCoefficients {
+    pub decay_m: f32,
+    pub decay_syn: f32,
+    pub coupling: f32,
+    pub delay_steps: usize,
+    pub refractory_steps: u32,
+}
+
+impl StepCoefficients {
+    pub fn new(p: &LifParams) -> Self {
+        assert!(p.dt > 0.0, "dt must be positive");
+        assert!(
+            (p.tau_m - p.tau_syn).abs() > 1e-6,
+            "tau_m and tau_syn must differ for the exact integrator"
+        );
+        let decay_m = (-p.dt / p.tau_m).exp();
+        let decay_syn = (-p.dt / p.tau_syn).exp();
+        Self {
+            decay_m,
+            decay_syn,
+            coupling: p.tau_syn / (p.tau_syn - p.tau_m) * (decay_syn - decay_m),
+            delay_steps: (p.delay / p.dt).round().max(1.0) as usize,
+            refractory_steps: (p.refractory / p.dt).round() as u32,
         }
     }
 }
