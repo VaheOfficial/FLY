@@ -39,6 +39,13 @@ Single-threaded CPU cost for 1000 ms of the whole nervous system:
 | 0.5 ms | ~0.3 s | 3.3x |
 | 1.0 ms | ~0.15 s | 6.7x |
 
+The GPU backend (the default; `--cpu` forces the reference) reproduces the
+CPU spike-for-spike on small networks and statistically on the full brain
+(same MN9 rates, active counts within 0.1%). On an RTX 4090, after about
+0.45 s of setup (upload plus shader compilation), 1000 ms costs ~0.45 s at a
+0.1 ms step and ~0.05 s at a 1 ms step, with the host thread only queueing
+work. Per-step cost is fixed dispatch overhead, so batch size barely matters.
+
 ## Feeding: sugar drives proboscis extension
 
 Labellar sugar GRNs are types `LB3b` and `LB3c` (Gr64f). Bitter GRNs are
