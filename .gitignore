@@ -1,0 +1,19 @@
+# Build output
+/target/
+**/target/
+
+# Datasets (fetched, never committed)
+/data/*
+!/data/README.md
+
+# Editor / OS
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log

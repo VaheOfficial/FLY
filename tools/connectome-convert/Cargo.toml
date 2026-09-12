@@ -1,0 +1,9 @@
+[package]
+name = "connectome-convert"
+description = "Build-time tool: converts published connectome tables into the packed binary flybrain loads"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]

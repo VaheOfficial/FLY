@@ -1,0 +1,8 @@
+[package]
+name = "flybrain"
+description = "Connectome-driven fruit fly nervous system simulation (portable, GPU compute via wgpu)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
