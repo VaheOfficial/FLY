@@ -7,7 +7,10 @@ license.workspace = true
 
 [dependencies]
 anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 flybrain.workspace = true
+png = "0.18"
 pollster = "1"
 wgpu = "30"
 winit = "0.30"

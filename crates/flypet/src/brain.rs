@@ -84,6 +84,7 @@ pub struct Brain<'a> {
     pub courtship_arousal: PopulationId,
     substrate_channel: usize,
     song_channel: usize,
+    sugar_channel: usize,
 }
 
 impl<'a> Brain<'a> {
@@ -112,8 +113,14 @@ impl<'a> Brain<'a> {
         ));
         let courtship_arousal =
             runtime.add_population(Population::from_types(net, "pC1", &pc1_types(net)));
+        let sugar_grns = runtime.add_population(Population::from_types(
+            net,
+            "labellar sugar GRNs",
+            &["LB3b", "LB3c"],
+        ));
         let substrate_channel = runtime.add_stimulus(leg_chordotonal, 0.0);
         let song_channel = runtime.add_stimulus(johnstons_organ, 0.0);
+        let sugar_channel = runtime.add_stimulus(sugar_grns, 0.0);
         Self {
             runtime,
             leg_chordotonal,
@@ -121,6 +128,7 @@ impl<'a> Brain<'a> {
             courtship_arousal,
             substrate_channel,
             song_channel,
+            sugar_channel,
         }
     }
 
@@ -130,6 +138,12 @@ impl<'a> Brain<'a> {
 
     pub fn population_size(&self, id: PopulationId) -> usize {
         self.runtime.population(id).len()
+    }
+
+    /// Sugar on the labellum, for demos and snapshots: a Poisson rate onto
+    /// the sugar GRNs.
+    pub fn set_sugar_hz(&mut self, rate_hz: f32) {
+        self.runtime.set_rate_hz(self.sugar_channel, rate_hz);
     }
 
     /// Deliver this frame's sensory drive.
@@ -142,6 +156,11 @@ impl<'a> Brain<'a> {
 
     pub fn rate_hz(&self, population: PopulationId) -> f32 {
         self.runtime.rate_hz(population)
+    }
+
+    /// Spikes per neuron in the most recent tick, for the viewer.
+    pub fn last_spike_counts(&self) -> &[u32] {
+        self.runtime.last_spike_counts()
     }
 
     pub fn tick(&mut self, elapsed: Duration) -> TickReport {

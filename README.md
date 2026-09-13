@@ -28,3 +28,13 @@ cargo run --release -p flybrain --example stimulate -- --stim LB3b,LB3c --report
 The last command drives the labellar sugar-sensing neurons and reports the
 proboscis motor neuron firing. See `docs/validation.md` for the circuits the
 model is checked against and how fast it runs.
+
+The pet itself, with its brain viewer window:
+
+```
+cargo run --release -p flypet
+```
+
+Typing anywhere on the desktop shakes the surface under the fly. Add
+`--sugar-hz 100` to feed it sugar, or `--snapshot brain.png` to save the
+viewer to a file after three seconds and exit.
