@@ -44,6 +44,8 @@ pub struct Runtime<'a> {
     max_steps_per_tick: u32,
     steps_run: u64,
     seed: u64,
+    /// Per-neuron spikes during the most recent tick that ran any steps.
+    last_spike_counts: Vec<u32>,
 }
 
 impl<'a> Runtime<'a> {
@@ -57,7 +59,14 @@ impl<'a> Runtime<'a> {
             max_steps_per_tick: DEFAULT_MAX_STEPS_PER_TICK,
             steps_run: 0,
             seed: 0x5EED,
+            last_spike_counts: Vec::new(),
         }
+    }
+
+    /// Spikes per neuron during the most recent tick that ran steps. Empty
+    /// before the first such tick.
+    pub fn last_spike_counts(&self) -> &[u32] {
+        &self.last_spike_counts
     }
 
     pub fn with_max_steps_per_tick(mut self, steps: u32) -> Self {
@@ -136,6 +145,7 @@ impl<'a> Runtime<'a> {
             let counts = self.sim.take_spike_counts();
             self.readout
                 .record(self.sim_time_ms(), &counts, &self.populations);
+            self.last_spike_counts = counts;
         }
         TickReport {
             steps,
@@ -208,6 +218,7 @@ mod tests {
         }
         assert!(rt.rate_hz(source) > 50.0, "source {}", rt.rate_hz(source));
         assert!(rt.rate_hz(target) > 10.0, "target {}", rt.rate_hz(target));
+        assert_eq!(rt.last_spike_counts().len(), 2);
 
         rt.set_rate_hz(channel, 0.0);
         for _ in 0..100 {
