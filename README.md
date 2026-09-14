@@ -37,4 +37,6 @@ cargo run --release -p flypet
 
 Typing anywhere on the desktop shakes the surface under the fly. Add
 `--sugar-hz 100` to feed it sugar, or `--snapshot brain.png` to save the
-viewer to a file after three seconds and exit.
+viewer to a file after three seconds and exit. To see full neuron
+morphologies in the viewer rather than cell bodies, fetch and build the
+skeletons as described in `data/README.md`.

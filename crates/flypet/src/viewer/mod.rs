@@ -1,7 +1,12 @@
-//! The brain viewer: a second window showing every brain neuron with a known
-//! soma, seen from the front, coloured by cell type and lit as it spikes.
+//! The brain viewer: a second window showing every brain neuron, seen from
+//! the front, coloured by cell type and lit as it spikes. Branching
+//! morphologies are drawn when a morphology file is available; cell bodies
+//! are always drawn.
 
+mod lines;
 mod palette;
+mod points;
+mod taper;
 
 use std::path::Path;
 use std::time::Duration;
@@ -9,41 +14,65 @@ use std::time::Duration;
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use flybrain::connectome::Connectome;
+use flybrain::morphology::Morphology;
 use wgpu::util::DeviceExt;
 
 use crate::gpu::{Gpu, acquire};
 use crate::snapshot::save_png;
+use lines::Lines;
+use points::Points;
 
 /// How long a spike stays visible: the glow falls to 1/e after this.
 const GLOW_DECAY: Duration = Duration::from_millis(180);
-/// Point size in pixels.
-const POINT_PX: f32 = 1.5;
 /// In this specimen the head is flexed: the brain faces anterior (its frontal
 /// plane is dataset x-y) while the nerve cord runs posterior along z. No soma
 /// lies in the neck connective, so everything below this z is cord.
 const NECK_Z: i32 = 46_000;
 
+/// Light a silent line vertex emits before region weight and depth: with
+/// millions of lines adding up, small is right.
+const RESTING_LIGHT: f32 = 0.011;
+/// Depth range of the brain in packed morphology units (16 nm): anterior
+/// surface to posterior surface. Lines fade across it.
+const DEPTH_NEAR: f32 = 6_000.0;
+const DEPTH_FAR: f32 = 20_000.0;
+
+/// Uniform shared by both pipelines; layout matches the shaders.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct View {
     scale: [f32; 2],
     offset: [f32; 2],
     half_size: [f32; 2],
+    voxels_per_unit: f32,
+    resting_light: f32,
+    depth_near: f32,
+    depth_far: f32,
     _pad: [f32; 2],
 }
+
+/// Light accumulates: source colour is added to what is already there.
+pub(super) const ADDITIVE: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent::REPLACE,
+};
 
 pub struct Viewer {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
     view_uniform: wgpu::Buffer,
     activity_buffer: wgpu::Buffer,
-    /// Neuron index of each drawn point, so activity can be gathered.
-    neuron_of_point: Vec<u32>,
+    /// Per neuron, 0 (silent) to 1 (just spiked).
     activity: Vec<f32>,
+    points: Points,
+    lines: Option<Lines>,
     /// Soma bounds in the viewing plane: min x, min y, max x, max y.
     bounds: [f32; 4],
+    pub show_somas: bool,
 }
 
 impl Viewer {
@@ -52,32 +81,30 @@ impl Viewer {
         surface: wgpu::Surface<'static>,
         size: (u32, u32),
         net: &Connectome,
+        morphology: Option<&Morphology>,
     ) -> Result<Self> {
         let config = gpu.surface_config(&surface, size, false)?;
 
-        let (neuron_of_point, positions) = frontal_brain_positions(net);
-        let bounds = bounds_of(&positions);
-        let colours: Vec<[f32; 4]> = neuron_of_point
+        let colours: Vec<[f32; 4]> = net
+            .neurons
             .iter()
-            .map(|&i| palette::for_type(net.neurons[i as usize].type_name))
+            .map(|n| palette::for_neuron(net, n))
             .collect();
-        let activity = vec![0.0f32; positions.len()];
-
-        let storage = |label: &str, contents: &[u8], writable: bool| {
-            gpu.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents,
-                    usage: if writable {
-                        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
-                    } else {
-                        wgpu::BufferUsages::STORAGE
-                    },
-                })
-        };
-        let positions_buffer = storage("soma positions", bytemuck::cast_slice(&positions), false);
-        let colours_buffer = storage("colours", bytemuck::cast_slice(&colours), false);
-        let activity_buffer = storage("activity", bytemuck::cast_slice(&activity), true);
+        let activity = vec![0.0f32; net.neuron_count()];
+        let colours_buffer = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("neuron colours"),
+                contents: bytemuck::cast_slice(&colours),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let activity_buffer = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("neuron activity"),
+                contents: bytemuck::cast_slice(&activity),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
         let view_uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("view"),
             size: std::mem::size_of::<View>() as u64,
@@ -85,84 +112,50 @@ impl Viewer {
             mapped_at_creation: false,
         });
 
-        let shader = gpu
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("points"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("points.wgsl").into()),
-            });
-        let read_only = wgpu::BufferBindingType::Storage { read_only: true };
-        let layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("points"),
-                entries: &[
-                    binding(0, wgpu::BufferBindingType::Uniform),
-                    binding(1, read_only),
-                    binding(2, read_only),
-                    binding(3, read_only),
-                ],
-            });
-        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("points"),
-            layout: &layout,
-            entries: &[
-                entry(0, &view_uniform),
-                entry(1, &positions_buffer),
-                entry(2, &colours_buffer),
-                entry(3, &activity_buffer),
-            ],
-        });
-        let pipeline_layout = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("points"),
-                bind_group_layouts: &[Some(&layout)],
-                ..Default::default()
-            });
-        let pipeline = gpu
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("points"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vertex"),
-                    buffers: &[],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fragment"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview_mask: None,
-                cache: None,
-            });
+        let points = Points::new(
+            gpu,
+            config.format,
+            net,
+            NECK_Z,
+            &view_uniform,
+            &colours_buffer,
+            &activity_buffer,
+        )?;
+        let lines = morphology
+            .map(|m| {
+                Lines::new(
+                    gpu,
+                    config.format,
+                    m,
+                    NECK_Z,
+                    &view_uniform,
+                    &colours_buffer,
+                    &activity_buffer,
+                )
+            })
+            .transpose()?;
 
         Ok(Self {
             surface,
             config,
-            pipeline,
-            bind_group,
             view_uniform,
             activity_buffer,
-            neuron_of_point,
             activity,
-            bounds,
+            bounds: points.bounds,
+            points,
+            lines,
+            show_somas: true,
         })
     }
 
-    pub fn point_count(&self) -> usize {
-        self.neuron_of_point.len()
+    pub fn describe(&self) -> String {
+        match &self.lines {
+            Some(lines) => format!(
+                "{} somas, {} morphology vertices in {} strips",
+                self.points.count, lines.vertex_count, lines.strip_count
+            ),
+            None => format!("{} somas, no morphology file", self.points.count),
+        }
     }
 
     pub fn resize(&mut self, gpu: &Gpu, width: u32, height: u32) {
@@ -176,9 +169,13 @@ impl Viewer {
     /// Decay the glow and add this frame's spikes.
     pub fn update(&mut self, counts: &[u32], elapsed: Duration) {
         let keep = (-elapsed.as_secs_f32() / GLOW_DECAY.as_secs_f32()).exp();
-        for (glow, &neuron) in self.activity.iter_mut().zip(&self.neuron_of_point) {
-            let spikes = counts.get(neuron as usize).copied().unwrap_or(0);
+        for (glow, &spikes) in self.activity.iter_mut().zip(counts) {
             *glow = (*glow * keep + spikes as f32 * 0.6).min(1.0);
+        }
+        if counts.is_empty() {
+            for glow in &mut self.activity {
+                *glow *= keep;
+            }
         }
     }
 
@@ -205,9 +202,9 @@ impl Viewer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.002,
-                            g: 0.0025,
-                            b: 0.006,
+                            r: 0.0015,
+                            g: 0.002,
+                            b: 0.004,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -216,9 +213,12 @@ impl Viewer {
                 })],
                 ..Default::default()
             });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.draw(0..6, 0..self.point_count() as u32);
+            if let Some(lines) = &self.lines {
+                lines.draw(&mut pass);
+            }
+            if self.show_somas {
+                self.points.draw(&mut pass);
+            }
         }
         gpu.queue.submit([encoder.finish()]);
         if let Some(path) = snapshot {
@@ -244,16 +244,13 @@ impl Viewer {
                 -(min_x + max_x) * 0.5 * scale_x,
                 (min_y + max_y) * 0.5 * scale_y,
             ],
-            half_size: [POINT_PX / w, POINT_PX / h],
+            half_size: [points::POINT_PX / w, points::POINT_PX / h],
+            voxels_per_unit: lines::VOXELS_PER_UNIT,
+            resting_light: RESTING_LIGHT,
+            depth_near: DEPTH_NEAR,
+            depth_far: DEPTH_FAR,
             _pad: [0.0; 2],
         }
-    }
-}
-
-fn entry(index: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
-    wgpu::BindGroupEntry {
-        binding: index,
-        resource: buffer.as_entire_binding(),
     }
 }
 
@@ -270,35 +267,9 @@ fn binding(index: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntr
     }
 }
 
-/// Brain neurons with a soma, seen from the front: dataset x across, y
-/// down, so dorsal is at the top.
-fn frontal_brain_positions(net: &Connectome) -> (Vec<u32>, Vec<[f32; 2]>) {
-    net.neurons
-        .iter()
-        .enumerate()
-        .filter_map(|(i, n)| match n.soma {
-            Some([x, y, z]) if z < NECK_Z => Some((i as u32, [x as f32, y as f32])),
-            _ => None,
-        })
-        .unzip()
-}
-
-fn bounds_of(points: &[[f32; 2]]) -> [f32; 4] {
-    points.iter().fold(
-        [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
-        |[x0, y0, x1, y1], &[x, y]| [x0.min(x), y0.min(y), x1.max(x), y1.max(y)],
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bounds_cover_all_points() {
-        assert_eq!(
-            bounds_of(&[[1.0, 5.0], [-2.0, 3.0], [4.0, -1.0]]),
-            [-2.0, -1.0, 4.0, 5.0]
-        );
+fn entry(index: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
+    wgpu::BindGroupEntry {
+        binding: index,
+        resource: buffer.as_entire_binding(),
     }
 }

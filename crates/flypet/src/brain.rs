@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use flybrain::backend::{self, Preference};
 use flybrain::connectome::{Connectome, io};
 use flybrain::gpu::GpuContext;
+use flybrain::morphology::{self, Morphology};
 use flybrain::runtime::{Population, PopulationId, Runtime, TickReport};
 use flybrain::sim::{LifParams, SignPolicy};
 
@@ -73,6 +74,17 @@ const JOHNSTONS_ORGAN_SOUND_TYPES: &[&str] = &[
 pub fn load_connectome(path: &Path) -> Result<Connectome> {
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
     io::read(BufReader::new(file)).with_context(|| format!("reading {}", path.display()))
+}
+
+/// The morphology file is optional: without it the viewer draws somas only.
+pub fn load_morphology(path: &Path) -> Result<Option<Morphology>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    morphology::read(BufReader::new(file))
+        .map(Some)
+        .with_context(|| format!("reading {}", path.display()))
 }
 
 /// The running brain plus handles to the populations the shell reads and drives.

@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::Parser;
 use flybrain::connectome::Connectome;
+use flybrain::morphology::Morphology;
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::WindowEvent;
@@ -46,6 +47,9 @@ struct Args {
     /// Packed connectome file.
     #[arg(default_value = "data/malecns-v1.0.flycnx")]
     connectome: PathBuf,
+    /// Packed morphology file for the viewer; skipped if absent.
+    #[arg(long, default_value = "data/malecns-v1.0.flyskel")]
+    morphology: PathBuf,
     /// Save the brain viewer to this PNG after `--snapshot-after` seconds, then exit.
     #[arg(long)]
     snapshot: Option<PathBuf>,
@@ -54,11 +58,15 @@ struct Args {
     /// Drive the sugar GRNs at this rate so the viewer has activity to show.
     #[arg(long, default_value_t = 0.0)]
     sugar_hz: f32,
+    /// Draw morphology only, without cell bodies.
+    #[arg(long)]
+    hide_somas: bool,
 }
 
 struct App<'a> {
     args: &'a Args,
     net: &'a Connectome,
+    morphology: Option<&'a Morphology>,
     gpu: Option<Gpu>,
     pet_window: Option<Arc<Window>>,
     viewer_window: Option<Arc<Window>>,
@@ -73,11 +81,12 @@ struct App<'a> {
 }
 
 impl<'a> App<'a> {
-    fn new(args: &'a Args, net: &'a Connectome) -> Self {
+    fn new(args: &'a Args, net: &'a Connectome, morphology: Option<&'a Morphology>) -> Self {
         let now = Instant::now();
         Self {
             args,
             net,
+            morphology,
             gpu: None,
             pet_window: None,
             viewer_window: None,
@@ -115,22 +124,24 @@ impl<'a> App<'a> {
         let renderer = Renderer::new(&gpu, pet_surface, (pet_size.width, pet_size.height))?;
         let viewer_surface = gpu.surface(&viewer_window)?;
         let viewer_size = viewer_window.inner_size();
-        let viewer = Viewer::new(
+        let mut viewer = Viewer::new(
             &gpu,
             viewer_surface,
             (viewer_size.width, viewer_size.height),
             self.net,
+            self.morphology,
         )?;
+        viewer.show_somas = !self.args.hide_somas;
+        println!("viewer: {}", viewer.describe());
 
         let mut brain = Brain::new(self.net, Some(gpu.sim_context()));
         brain.set_sugar_hz(self.args.sugar_hz);
         println!("backend: {}", brain.backend_name());
         println!(
-            "populations: leg CO {}, JO sound {}, pC1 {}; viewer points {}",
+            "populations: leg CO {}, JO sound {}, pC1 {}",
             brain.population_size(brain.leg_chordotonal),
             brain.population_size(brain.johnstons_organ),
-            brain.population_size(brain.courtship_arousal),
-            viewer.point_count()
+            brain.population_size(brain.courtship_arousal)
         );
         let senses = Senses::install()?;
 
@@ -256,8 +267,21 @@ fn main() -> Result<()> {
         net.edge_count()
     );
 
+    let morphology = brain::load_morphology(&args.morphology)?;
+    match &morphology {
+        Some(m) => println!(
+            "loaded morphology: {} vertices in {} strips",
+            m.vertex_count(),
+            m.strips.len()
+        ),
+        None => println!(
+            "no morphology file at {}; drawing somas only",
+            args.morphology.display()
+        ),
+    }
+
     let event_loop = EventLoop::new()?;
-    let mut app = App::new(&args, &net);
+    let mut app = App::new(&args, &net, morphology.as_ref());
     event_loop.run_app(&mut app)?;
     Ok(())
 }
