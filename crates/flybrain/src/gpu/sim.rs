@@ -423,7 +423,7 @@ fn layout_entries() -> [wgpu::BindGroupLayoutEntry; 11] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu::context_or_skip;
+    use crate::gpu::{TestGpu, context_or_skip};
     use crate::sim::test_net::{ACH, GABA, net};
     use crate::sim::{CpuSim, PoissonDrive};
 
@@ -434,7 +434,9 @@ mod tests {
         steps: usize,
         mut inject: impl FnMut(u64) -> Vec<(u32, f32)>,
     ) {
-        let Some(ctx) = context_or_skip() else { return };
+        let Some(TestGpu { ctx, _serial }) = context_or_skip() else {
+            return;
+        };
         let params = LifParams::default();
         let mut cpu = CpuSim::new(net, params.clone(), SignPolicy::default());
         let mut gpu = GpuSim::new(ctx, net, params, SignPolicy::default());
@@ -514,7 +516,9 @@ mod tests {
 
     #[test]
     fn batched_steps_match_single_steps() {
-        let Some(ctx) = context_or_skip() else { return };
+        let Some(TestGpu { ctx, _serial }) = context_or_skip() else {
+            return;
+        };
         let c = net(&[ACH, ACH], &[(0, 1, 200)]);
         let params = LifParams::default();
         let mut cpu = CpuSim::new(&c, params.clone(), SignPolicy::default());

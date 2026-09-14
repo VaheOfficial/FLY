@@ -106,7 +106,7 @@ pub fn download<T: Pod>(ctx: &GpuContext, source: &Buffer) -> Vec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu::context_or_skip;
+    use crate::gpu::{TestGpu, context_or_skip};
     use crate::sim::test_net::{ACH, GABA, net};
 
     #[test]
@@ -117,7 +117,9 @@ mod tests {
 
     #[test]
     fn upload_then_download_roundtrips() {
-        let Some(ctx) = context_or_skip() else { return };
+        let Some(TestGpu { ctx, _serial }) = context_or_skip() else {
+            return;
+        };
         let c = net(&[ACH, GABA, ACH], &[(0, 1, 5), (0, 2, 7), (2, 1, 9)]);
         let usage = BufferUsages::STORAGE | BufferUsages::COPY_SRC;
         let post = init_buffer(&ctx, "post", &c.post, usage);

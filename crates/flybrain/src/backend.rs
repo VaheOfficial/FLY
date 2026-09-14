@@ -96,6 +96,7 @@ mod tests {
 
     #[test]
     fn gpu_then_cpu_always_yields_a_working_simulator() {
+        let _serial = crate::gpu::gpu_test_lock();
         let c = net(&[ACH, ACH], &[(0, 1, 200)]);
         let (mut sim, _) = open(
             &c,

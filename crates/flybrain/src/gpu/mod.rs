@@ -126,10 +126,34 @@ pub fn required_limits(
     })
 }
 
+/// GPU tests run one at a time: several test threads opening devices on the
+/// same adapter at once has deadlocked in the driver.
 #[cfg(test)]
-pub(crate) fn context_or_skip() -> Option<GpuContext> {
+static GPU_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Hold this for the whole of any test that touches the GPU.
+#[cfg(test)]
+pub(crate) fn gpu_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    GPU_TESTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A test's GPU context together with the serialising lock.
+#[cfg(test)]
+pub(crate) struct TestGpu {
+    pub ctx: GpuContext,
+    pub _serial: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+pub(crate) fn context_or_skip() -> Option<TestGpu> {
+    let serial = gpu_test_lock();
     match GpuContext::new(1 << 20) {
-        Ok(ctx) => Some(ctx),
+        Ok(ctx) => Some(TestGpu {
+            ctx,
+            _serial: serial,
+        }),
         Err(e) => {
             eprintln!("skipping GPU test: {e}");
             None
@@ -143,7 +167,9 @@ mod tests {
 
     #[test]
     fn context_opens_and_reports_adapter() {
-        let Some(ctx) = context_or_skip() else { return };
+        let Some(TestGpu { ctx, _serial }) = context_or_skip() else {
+            return;
+        };
         assert!(!ctx.adapter_info.name.is_empty());
         assert!(ctx.limits.max_storage_buffers_per_shader_stage >= STORAGE_BUFFERS_NEEDED);
         ctx.wait_idle();
