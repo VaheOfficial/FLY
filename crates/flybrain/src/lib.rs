@@ -7,5 +7,6 @@
 pub mod backend;
 pub mod connectome;
 pub mod gpu;
+pub mod morphology;
 pub mod runtime;
 pub mod sim;
