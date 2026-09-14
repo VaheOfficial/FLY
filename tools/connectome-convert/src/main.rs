@@ -7,6 +7,8 @@ mod edges;
 mod feather;
 mod malecns;
 mod neurons;
+mod skeleton_pack;
+mod skeleton_simplify;
 mod transmitters;
 
 use std::path::PathBuf;
@@ -63,6 +65,31 @@ enum Command {
         #[arg(long, default_value = "data/malecns-v1.0.flycnx")]
         out: PathBuf,
     },
+    /// Download every neuron's low-resolution skeleton into one pack file.
+    /// Resumable: rerun to continue an interrupted fetch.
+    FetchSkeletons {
+        /// Directory holding the downloaded MaleCNS flat-connectome tables.
+        #[arg(long, default_value = "data/malecns-v1.0")]
+        data: PathBuf,
+    },
+    /// Simplify the fetched skeletons into the packed morphology file the
+    /// viewer draws.
+    BuildSkeletons {
+        /// Directory holding the skeleton pack from fetch-skeletons.
+        #[arg(long, default_value = "data/malecns-v1.0")]
+        data: PathBuf,
+        /// Packed connectome the neuron indices refer to.
+        #[arg(long, default_value = "data/malecns-v1.0.flycnx")]
+        connectome: PathBuf,
+        /// Minimum spacing between kept vertices along a branch, nm.
+        #[arg(long, default_value_t = 8000.0)]
+        spacing_nm: f32,
+        /// Terminal branches shorter than this are dropped, nm.
+        #[arg(long, default_value_t = 20_000.0)]
+        prune_nm: f32,
+        #[arg(long, default_value = "data/malecns-v1.0.flyskel")]
+        out: PathBuf,
+    },
     /// Load a packed connectome file, verify it, and print a summary plus the
     /// strongest outputs of a named cell type as a sanity check.
     Check {
@@ -100,6 +127,22 @@ fn main() -> Result<()> {
         }
         Command::Summarize { data } => commands::summarize::run(&data),
         Command::Build { data, out } => commands::build::run(&data, &out),
+        Command::FetchSkeletons { data } => {
+            commands::fetch_skeletons::run(&data, &data.join(malecns::SKELETON_PACK))
+        }
+        Command::BuildSkeletons {
+            data,
+            connectome,
+            spacing_nm,
+            prune_nm,
+            out,
+        } => commands::build_skeletons::run(
+            &data.join(malecns::SKELETON_PACK),
+            &connectome,
+            spacing_nm,
+            prune_nm,
+            &out,
+        ),
         Command::Check {
             path,
             cell_type,

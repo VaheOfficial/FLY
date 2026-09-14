@@ -23,3 +23,21 @@ already present and verified.
 
 Source: Janelia FlyEM, `gs://flyem-male-cns/v1.0/connectome-data/flat-connectome/`,
 licensed CC-BY 4.0.
+
+## Skeletons for the brain viewer
+
+The viewer draws neuron morphologies from the low-resolution precomputed
+skeletons in the same bucket. Two steps, both from the repo root:
+
+```
+cargo run --release -p connectome-convert -- fetch-skeletons
+cargo run --release -p connectome-convert -- build-skeletons
+```
+
+The first downloads all 166,700 skeletons (about 5.4 GB, ten minutes on a
+fast connection) into `data/malecns-v1.0/skeletons-precomputed.pack`; it is
+resumable, so rerun it after an interruption. The second prunes terminal
+twigs shorter than 20 µm, decimates branches to 8 µm spacing, and writes
+`data/malecns-v1.0.flyskel` (about 127 MB, 11 million vertices). Both
+settings are flags on `build-skeletons`. Without the morphology file flypet
+still runs and draws cell bodies only.
